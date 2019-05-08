@@ -407,7 +407,7 @@ class RedisBackend(KeyValueStoreBackend):
 
     def _create_client(self, **params):
         return self._get_client()(
-            connection_pool=self._get_pool(**params),
+            connection_pool=self.connection_pool,
         )
 
     def _get_client(self):
@@ -421,6 +421,10 @@ class RedisBackend(KeyValueStoreBackend):
         if self._ConnectionPool is None:
             self._ConnectionPool = self.redis.ConnectionPool
         return self._ConnectionPool
+
+    @cached_property
+    def connection_pool(self):
+        return self._get_pool(**self.connparams)
 
     @cached_property
     def client(self):
