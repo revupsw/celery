@@ -224,6 +224,13 @@ class RedisBackend(KeyValueStoreBackend):
 
         self.url = url
 
+        result_backend_transport_opts = self.app.conf.get(
+            "result_backend_transport_options", {})
+        connkwargs = result_backend_transport_opts.get(
+            'CONNECTION_POOL_KWARGS', {})
+        if connkwargs:
+            self.connparams.update(connkwargs)
+
         self.connection_errors, self.channel_errors = (
             get_redis_error_classes() if get_redis_error_classes
             else ((), ()))
