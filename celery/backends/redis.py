@@ -21,7 +21,7 @@ from celery.utils.log import get_logger
 from celery.utils.time import humanize_seconds
 
 from .asynchronous import AsyncBackendMixin, BaseResultConsumer
-from .base import BaseKeyValueStoreBackend
+from .base import KeyValueStoreBackend
 
 try:
     from urllib.parse import unquote
@@ -148,10 +148,8 @@ class ResultConsumer(BaseResultConsumer):
             self._pubsub.unsubscribe(key)
 
 
-class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
+class RedisBackend(KeyValueStoreBackend):
     """Redis task result store."""
-
-    ResultConsumer = ResultConsumer
 
     #: :pypi:`redis` client module.
     redis = redis
@@ -226,13 +224,16 @@ class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
 
         self.url = url
 
+        result_backend_transport_opts = self.app.conf.get(
+            "result_backend_transport_options", {})
+        connkwargs = result_backend_transport_opts.get(
+            'CONNECTION_POOL_KWARGS', {})
+        if connkwargs:
+            self.connparams.update(connkwargs)
+
         self.connection_errors, self.channel_errors = (
             get_redis_error_classes() if get_redis_error_classes
             else ((), ()))
-        self.result_consumer = self.ResultConsumer(
-            self, self.app, self.accept,
-            self._pending_results, self._pending_messages,
-        )
 
     def _params_from_url(self, url, defaults):
         scheme, host, port, _, password, path, query = _parse_url(url)
@@ -289,10 +290,6 @@ class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
         connparams.update(query)
         return connparams
 
-    def on_task_call(self, producer, task_id):
-        if not task_join_will_block():
-            self.result_consumer.consume_from(task_id)
-
     def get(self, key):
         return self.client.get(key)
 
@@ -325,10 +322,6 @@ class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
                 pipe.set(key, value)
             pipe.publish(key, value)
             pipe.execute()
-
-    def forget(self, task_id):
-        super(RedisBackend, self).forget(task_id)
-        self.result_consumer.cancel_for(task_id)
 
     def delete(self, key):
         self.client.delete(key)
@@ -421,7 +414,7 @@ class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
 
     def _create_client(self, **params):
         return self._get_client()(
-            connection_pool=self._get_pool(**params),
+            connection_pool=self.connection_pool,
         )
 
     def _get_client(self):
@@ -435,6 +428,10 @@ class RedisBackend(BaseKeyValueStoreBackend, AsyncBackendMixin):
         if self._ConnectionPool is None:
             self._ConnectionPool = self.redis.ConnectionPool
         return self._ConnectionPool
+
+    @cached_property
+    def connection_pool(self):
+        return self._get_pool(**self.connparams)
 
     @cached_property
     def client(self):
